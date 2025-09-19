@@ -1,0 +1,24 @@
+[package]
+name = "irpc"
+version = "0.1.0"
+edition = "2021"
+description = "Robotic node interaction protocol"
+license = "GPL-3.0"
+repository = "https://github.com/angkira/iRPC"
+keywords = ["robotics", "rpc", "protocol", "embedded"]
+categories = ["network-programming", "embedded", "no-std"]
+
+[features]
+default = []
+# Feature for std host environments (includes async runtime and logging)
+arm_api = ["tokio", "tracing"]
+# Feature for no_std embedded environments
+joint_api = []
+
+[dependencies]
+# Optional dependencies activated by arm_api feature
+tokio = { version = "1.0", features = ["full"], optional = true }
+tracing = { version = "0.1", optional = true }
+
+[dev-dependencies]
+tokio-test = "0.4"
