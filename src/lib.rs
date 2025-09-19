@@ -11,6 +11,7 @@
 extern crate alloc;
 
 // Core modules available in all configurations
+pub mod config;
 pub mod protocol;
 pub mod bus;
 
@@ -22,6 +23,7 @@ pub mod arm;
 pub mod joint;
 
 // Re-export commonly used types
+pub use config::*;
 pub use protocol::*;
 pub use bus::*;
 

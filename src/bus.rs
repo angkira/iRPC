@@ -1,24 +1,31 @@
-//! Communication bus abstraction for iRPC
+use crate::protocol::{Message, DeviceId};
+use async_trait::async_trait;
 
-use crate::protocol::{Message, ProtocolError};
+// Import Vec and Box for async trait
+#[cfg(feature = "arm_api")]
+use std::vec::Vec;
+#[cfg(feature = "arm_api")]
+use std::boxed::Box;
 
-/// Trait for communication bus implementations
-pub trait Bus {
-    /// Send a message over the bus
-    fn send(&mut self, message: Message) -> Result<(), ProtocolError>;
-    
-    /// Receive a message from the bus
-    fn receive(&mut self) -> Result<Option<Message>, ProtocolError>;
-    
-    /// Check if the bus is connected
-    fn is_connected(&self) -> bool;
+#[cfg(not(feature = "arm_api"))]
+extern crate alloc;
+#[cfg(not(feature = "arm_api"))]
+use alloc::vec::Vec;
+#[cfg(not(feature = "arm_api"))]
+use alloc::boxed::Box;
+
+#[derive(Debug, Clone)]
+pub struct DeviceInfo {
+    pub id: DeviceId,
+    pub entity_type: u16,
 }
 
-/// Configuration for bus implementations
-#[derive(Debug, Clone)]
-pub struct BusConfig {
-    /// Maximum message size in bytes
-    pub max_message_size: usize,
-    /// Connection timeout in milliseconds
-    pub timeout_ms: u32,
+#[async_trait]
+pub trait CommunicationAdapter: Send + Sync {
+    type Error: core::fmt::Debug;
+    
+    async fn transmit(&self, message: &Message) -> Result<(), Self::Error>;
+    async fn receive(&self) -> Result<Option<Message>, Self::Error>;
+    async fn discover_devices(&self) -> Result<Vec<DeviceInfo>, Self::Error>;
+    fn is_connected(&self) -> bool;
 }

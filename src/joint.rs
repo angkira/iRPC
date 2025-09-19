@@ -42,7 +42,7 @@ impl JointClient {
     /// Send a message synchronously
     pub fn send(&mut self, _message: Message) -> Result<(), ProtocolError> {
         if !self.connected {
-            return Err(ProtocolError::IoError("Not connected".into()));
+            return Err(ProtocolError::IoError(0));
         }
         // Implementation would interface with hardware
         Ok(())
@@ -51,7 +51,7 @@ impl JointClient {
     /// Try to receive a message (non-blocking)
     pub fn try_receive(&mut self) -> Result<Option<Message>, ProtocolError> {
         if !self.connected {
-            return Err(ProtocolError::IoError("Not connected".into()));
+            return Err(ProtocolError::IoError(0));
         }
         // Implementation would interface with hardware
         Ok(None)
