@@ -1,0 +1,101 @@
+# Cursor Rules for iRPC Rust Library
+
+## Project Context
+iRPC is a feature-gated Rust library for robotic node interaction protocol supporting both std host environments (arm_api) and no_std embedded environments (joint_api).
+
+## Core Development Principles
+
+### 1. Feature-Gated Architecture
+- Always use conditional compilation for environment-specific code
+- Test code changes with multiple feature combinations
+- Keep universal code in protocol.rs and bus.rs modules
+- Environment-specific code goes in arm.rs (std) and joint.rs (no_std)
+
+### 2. Rust Best Practices
+- Use Rust 2021 edition conventions
+- Implement Clone + Debug for data types
+- Prefer Result<T, ProtocolError> for fallible operations
+- Use const fn constructors for embedded compatibility
+- Follow existing error handling patterns with ProtocolError enum
+
+### 3. No_std/Embedded Guidelines
+- Use const constructors: `pub const fn new() -> Self`
+- Fixed-size buffers over dynamic allocation: `[u8; 256]`
+- Non-blocking APIs: `try_receive()` vs `receive()`
+- Import from alloc crate when std unavailable
+- Minimal memory footprint and deterministic behavior
+
+### 4. Std/Host Environment Guidelines  
+- Use async/await with tokio runtime
+- Leverage tracing crate for logging
+- Use tokio::sync primitives for concurrency
+- Rich error messages and debugging support
+
+### 5. Code Patterns
+
+#### Feature-gated imports:
+```rust
+#[cfg(feature = "arm_api")]
+use std::vec::Vec;
+#[cfg(not(feature = "arm_api"))]
+extern crate alloc;
+#[cfg(not(feature = "arm_api"))]
+use alloc::vec::Vec;
+```
+
+#### Error handling:
+```rust
+pub fn operation() -> Result<(), ProtocolError> {
+    // implementation
+    Ok(())
+}
+```
+
+#### Async methods (arm_api only):
+```rust
+#[cfg(feature = "arm_api")]
+pub async fn send_async(&self, msg: Message) -> Result<(), ProtocolError> {
+    // async implementation
+}
+```
+
+#### Sync methods (joint_api):
+```rust
+pub fn send(&mut self, msg: Message) -> Result<(), ProtocolError> {
+    // sync implementation
+}
+```
+
+### 6. Testing Requirements
+- Feature-gate all tests appropriately
+- Use #[tokio::test] for async tests
+- Test with different feature combinations
+- Include integration tests for protocol compliance
+
+### 7. Documentation Standards
+- Document feature requirements for all public APIs
+- Include examples for both environments when applicable
+- Use #[doc(cfg(feature = "..."))] attributes
+- Document memory constraints for embedded APIs
+
+### 8. Performance Guidelines
+- Embedded: Stack over heap, const over runtime, sync over async
+- Host: Leverage async I/O, rich error context, concurrent operations
+- Use #[inline] for hot paths
+- Profile memory usage for embedded targets
+
+### 9. Dependency Management
+- Optional dependencies only, activated by features
+- Ensure no_std compatibility for shared dependencies
+- Document MSRV requirements
+- Prefer core/alloc over std in universal code
+
+### 10. Code Review Checklist
+- ✅ Compiles with --no-default-features
+- ✅ Compiles with each feature individually  
+- ✅ Compiles with all features enabled
+- ✅ Tests pass for each feature combination
+- ✅ Documentation updated for new APIs
+- ✅ Memory constraints considered for embedded
+- ✅ Error handling follows existing patterns
+- ✅ No panics in library code
