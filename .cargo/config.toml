@@ -1,0 +1,7 @@
+[build]
+# Set the default target for embedded builds (e.g., Cortex-M4/M7)
+target = "thumbv7em-none-eabihf"
+
+[target.thumbv7em-none-eabihf]
+# Example runner for flashing and debugging with probe-rs
+# runner = "probe-rs run --chip STM32F401RE"

@@ -31,7 +31,7 @@ impl ArmClient {
     pub async fn send_async(&self, message: Message) -> Result<(), ProtocolError> {
         debug!("Sending message: {:?}", message);
         self.sender.send(message)
-            .map_err(|_| ProtocolError::IoError("Channel closed".to_string()))
+            .map_err(|_| ProtocolError::IoError(0))
     }
     
     /// Receive a message asynchronously

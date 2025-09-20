@@ -1,33 +1,62 @@
-//! Core protocol definitions and message types for iRPC
+use serde::{Serialize, Deserialize};
 
-// Import std types when arm_api feature is enabled, otherwise use no_std alternatives
-#[cfg(feature = "arm_api")]
-use std::vec::Vec;
-#[cfg(feature = "arm_api")]
-use std::string::String;
+pub type DeviceId = u16;
+pub type MessageId = u32;
 
-#[cfg(not(feature = "arm_api"))]
-extern crate alloc;
-#[cfg(not(feature = "arm_api"))]
-use alloc::vec::Vec;
-#[cfg(not(feature = "arm_api"))]
-use alloc::string::String;
-
-/// Protocol version information
-pub const PROTOCOL_VERSION: &str = "1.0.0";
-
-/// Core message types for the iRPC protocol
-#[derive(Debug, Clone)]
-pub enum Message {
-    /// Request message with ID and payload
-    Request { id: u32, payload: Vec<u8> },
-    /// Response message with ID and result
-    Response { id: u32, result: Result<Vec<u8>, String> },
-    /// Notification message (fire-and-forget)
-    Notification { payload: Vec<u8> },
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum LifecycleState {
+    Unconfigured,
+    Inactive,
+    Active,
+    Error,
 }
 
-/// Error types for protocol operations
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct SetTargetPayload {
+    pub target_angle: f32,
+    pub velocity_limit: f32,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct EncoderTelemetry {
+    pub position: f32,
+    pub velocity: f32,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum Payload {
+    // Arm -> Joint Commands
+    SetTarget(SetTargetPayload),
+    Configure,
+    Activate,
+    Deactivate,
+    Reset,
+
+    // Joint -> Arm Telemetry & Status
+    Encoder(EncoderTelemetry),
+    JointStatus { state: LifecycleState, error_code: u16 },
+
+    // Bidirectional Management
+    Ack(MessageId),
+    Nack { id: MessageId, error: u16 },
+    ArmReady,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Header {
+    pub source_id: DeviceId,
+    pub target_id: DeviceId,
+    pub msg_id: MessageId,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Message {
+  pub header: Header,
+  pub payload: Payload,
+}
+
+/// Basic error type for compatibility with existing modules
 #[derive(Debug, Clone)]
 pub enum ProtocolError {
     /// Invalid message format
@@ -37,5 +66,5 @@ pub enum ProtocolError {
     /// Communication timeout
     Timeout,
     /// General IO error
-    IoError(String),
+    IoError(MessageId),
 }
