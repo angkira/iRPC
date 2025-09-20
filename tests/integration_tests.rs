@@ -73,6 +73,148 @@ fn test_payload_variants() {
     }
 }
 
+#[cfg(feature = "joint_api")]
+#[test]
+fn test_joint_state_machine() {
+    use irpc::Joint;
+    
+    let mut joint = Joint::new(0x0010);
+    
+    // Test initial state
+    assert_eq!(joint.state(), LifecycleState::Unconfigured);
+    
+    // Test Configure command
+    let configure_msg = Message {
+        header: Header {
+            source_id: 0x0001,
+            target_id: 0x0010,
+            msg_id: 1,
+        },
+        payload: Payload::Configure,
+    };
+    
+    let response = joint.handle_message(&configure_msg);
+    assert!(response.is_some());
+    assert_eq!(joint.state(), LifecycleState::Inactive);
+    
+    // Test Activate command
+    let activate_msg = Message {
+        header: Header {
+            source_id: 0x0001,
+            target_id: 0x0010,
+            msg_id: 2,
+        },
+        payload: Payload::Activate,
+    };
+    
+    let response = joint.handle_message(&activate_msg);
+    assert!(response.is_some());
+    assert_eq!(joint.state(), LifecycleState::Active);
+    
+    // Test that we can handle messages when active
+    let set_target_msg = Message {
+        header: Header {
+            source_id: 0x0001,
+            target_id: 0x0010,
+            msg_id: 3,
+        },
+        payload: Payload::SetTarget(irpc::SetTargetPayload {
+            target_angle: 90.0,
+            velocity_limit: 10.0,
+        }),
+    };
+    
+    let response = joint.handle_message(&set_target_msg);
+    assert!(response.is_some());
+    
+    // Test Deactivate command
+    let deactivate_msg = Message {
+        header: Header {
+            source_id: 0x0001,
+            target_id: 0x0010,
+            msg_id: 4,
+        },
+        payload: Payload::Deactivate,
+    };
+    
+    let response = joint.handle_message(&deactivate_msg);
+    assert!(response.is_some());
+    assert_eq!(joint.state(), LifecycleState::Inactive);
+    
+    // Test Reset command
+    let reset_msg = Message {
+        header: Header {
+            source_id: 0x0001,
+            target_id: 0x0010,
+            msg_id: 5,
+        },
+        payload: Payload::Reset,
+    };
+    
+    let response = joint.handle_message(&reset_msg);
+    assert!(response.is_some());
+    assert_eq!(joint.state(), LifecycleState::Unconfigured);
+}
+
+#[cfg(feature = "joint_api")]
+#[test]
+fn test_joint_invalid_state_transitions() {
+    use irpc::Joint;
+    
+    let mut joint = Joint::new(0x0010);
+    
+    // Try to activate without configuring first
+    let activate_msg = Message {
+        header: Header {
+            source_id: 0x0001,
+            target_id: 0x0010,
+            msg_id: 1,
+        },
+        payload: Payload::Activate,
+    };
+    
+    let response = joint.handle_message(&activate_msg);
+    assert!(response.is_some());
+    
+    // Should remain in Unconfigured state
+    assert_eq!(joint.state(), LifecycleState::Unconfigured);
+    
+    // Check that response is a NACK
+    if let Some(resp) = response {
+        match resp.payload {
+            Payload::Nack { id, error } => {
+                assert_eq!(id, 1);
+                assert_eq!(error, 2); // Invalid state for activate
+            }
+            _ => panic!("Expected NACK response"),
+        }
+    }
+}
+
+#[cfg(feature = "joint_api")]
+#[test]
+fn test_joint_message_targeting() {
+    use irpc::Joint;
+    
+    let mut joint = Joint::new(0x0010);
+    
+    // Message targeted to different joint should be ignored
+    let msg_wrong_target = Message {
+        header: Header {
+            source_id: 0x0001,
+            target_id: 0x0020, // Different target
+            msg_id: 1,
+        },
+        payload: Payload::Configure,
+    };
+    
+    let response = joint.handle_message(&msg_wrong_target);
+    assert!(response.is_none());
+    
+    // State should remain unchanged
+    assert_eq!(joint.state(), LifecycleState::Unconfigured);
+}
+
 /*
 #[cfg(feature = "arm_api")]
 #[tokio::test]

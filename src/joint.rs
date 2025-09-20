@@ -1,65 +1,105 @@
-//! Joint API module for no_std embedded environments
-//! 
-//! This module provides functionality for embedded environments
-//! without std library dependencies.
+#![cfg_attr(not(feature = "std"), no_std)]
 
-use crate::protocol::{Message, ProtocolError};
+use crate::protocol::{DeviceId, LifecycleState, Message, Payload, Header};
 
-/// Joint-specific client for embedded environments
-pub struct JointClient {
-    buffer: [u8; 256],
-    buffer_len: usize,
-    connected: bool,
+/// Represents a single joint on the embedded device, driven by a state machine.
+pub struct Joint {
+    id: DeviceId,
+    state: LifecycleState,
 }
 
-impl JointClient {
-    /// Create a new Joint client
-    pub const fn new() -> Self {
+impl Joint {
+    /// Creates a new Joint in the Unconfigured state.
+    pub fn new(id: DeviceId) -> Self {
         Self {
-            buffer: [0; 256],
-            buffer_len: 0,
-            connected: false,
+            id,
+            state: LifecycleState::Unconfigured,
         }
     }
     
-    /// Connect to the communication interface
-    pub fn connect(&mut self) -> Result<(), ProtocolError> {
-        self.connected = true;
-        Ok(())
+    /// Returns the current lifecycle state of the Joint.
+    pub fn state(&self) -> LifecycleState {
+        self.state
     }
-    
-    /// Disconnect from the communication interface
-    pub fn disconnect(&mut self) {
-        self.connected = false;
-        self.buffer_len = 0;
-    }
-    
-    /// Check if connected
-    pub fn is_connected(&self) -> bool {
-        self.connected
-    }
-    
-    /// Send a message synchronously
-    pub fn send(&mut self, _message: Message) -> Result<(), ProtocolError> {
-        if !self.connected {
-            return Err(ProtocolError::IoError(0));
-        }
-        // Implementation would interface with hardware
-        Ok(())
-    }
-    
-    /// Try to receive a message (non-blocking)
-    pub fn try_receive(&mut self) -> Result<Option<Message>, ProtocolError> {
-        if !self.connected {
-            return Err(ProtocolError::IoError(0));
-        }
-        // Implementation would interface with hardware
-        Ok(None)
-    }
-}
 
-impl Default for JointClient {
-    fn default() -> Self {
-        Self::new()
+    /// The core state machine logic. Processes an incoming message and returns a response.
+    /// This function is the heart of the firmware's command processing.
+    pub fn handle_message(&mut self, msg: &Message) -> Option<Message> {
+        // Check if the message is targeted to this joint
+        if msg.header.target_id != self.id {
+            return None;
+        }
+
+        let response_payload = match &msg.payload {
+            Payload::Configure => {
+                match self.state {
+                    LifecycleState::Unconfigured => {
+                        self.state = LifecycleState::Inactive;
+                        Some(Payload::Ack(msg.header.msg_id))
+                    }
+                    _ => Some(Payload::Nack { 
+                        id: msg.header.msg_id, 
+                        error: 1 // Invalid state for configure
+                    })
+                }
+            }
+            Payload::Activate => {
+                match self.state {
+                    LifecycleState::Inactive => {
+                        self.state = LifecycleState::Active;
+                        Some(Payload::Ack(msg.header.msg_id))
+                    }
+                    _ => Some(Payload::Nack { 
+                        id: msg.header.msg_id, 
+                        error: 2 // Invalid state for activate
+                    })
+                }
+            }
+            Payload::Deactivate => {
+                match self.state {
+                    LifecycleState::Active => {
+                        self.state = LifecycleState::Inactive;
+                        Some(Payload::Ack(msg.header.msg_id))
+                    }
+                    _ => Some(Payload::Nack { 
+                        id: msg.header.msg_id, 
+                        error: 3 // Invalid state for deactivate
+                    })
+                }
+            }
+            Payload::Reset => {
+                self.state = LifecycleState::Unconfigured;
+                Some(Payload::Ack(msg.header.msg_id))
+            }
+            Payload::SetTarget(_target) => {
+                match self.state {
+                    LifecycleState::Active => {
+                        // In a real implementation, this would set the target angle and velocity
+                        Some(Payload::Ack(msg.header.msg_id))
+                    }
+                    _ => Some(Payload::Nack { 
+                        id: msg.header.msg_id, 
+                        error: 4 // Invalid state for set target
+                    })
+                }
+            }
+            _ => {
+                // Unknown or unhandled command
+                Some(Payload::Nack { 
+                    id: msg.header.msg_id, 
+                    error: 255 // Unknown command
+                })
+            }
+        };
+
+        // Create response message if we have a payload to send
+        response_payload.map(|payload| Message {
+            header: Header {
+                source_id: self.id,
+                target_id: msg.header.source_id,
+                msg_id: msg.header.msg_id, // Echo back the message ID for correlation
+            },
+            payload,
+        })
     }
 }
