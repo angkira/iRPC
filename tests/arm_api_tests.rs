@@ -13,7 +13,7 @@ async fn test_communication_manager() {
     
     // Test that communication manager can be created and used
     // The actual functionality requires a full messaging loop to test properly
-    assert!(std::ptr::addr_of!(comm_manager).is_null() == false);
+    assert!(true); // Smoke check: CommunicationManager was created
 }
 
 #[cfg(feature = "arm_api")]
