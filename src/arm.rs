@@ -70,15 +70,29 @@ impl CommunicationManager {
         };
         
         // Send message
-        self.outbound_tx.send(message)
-            .map_err(|_| ProtocolError::IoError(msg_id))?;
+        if let Err(_) = self.outbound_tx.send(message) {
+            // Remove the pending response entry on send failure
+            let mut pending = self.pending_responses.write().await;
+            pending.remove(&msg_id);
+            return Err(ProtocolError::IoError(msg_id));
+        }
         
         // Wait for response with timeout
-        tokio::time::timeout(std::time::Duration::from_secs(5), rx)
-            .await
-            .map_err(|_| ProtocolError::Timeout)?
-            .map_err(|_| ProtocolError::IoError(msg_id))
-    }
+        match tokio::time::timeout(std::time::Duration::from_secs(5), rx).await {
+            Ok(Ok(msg)) => Ok(msg),
+            Ok(Err(_)) => {
+                // Remove the pending response entry on oneshot receive error
+                let mut pending = self.pending_responses.write().await;
+                pending.remove(&msg_id);
+                Err(ProtocolError::IoError(msg_id))
+            }
+            Err(_) => {
+                // Remove the pending response entry on timeout
+                let mut pending = self.pending_responses.write().await;
+                pending.remove(&msg_id);
+                Err(ProtocolError::Timeout)
+            }
+        }
     
     /// Send a message without waiting for response
     pub async fn send_fire_and_forget(&self, target_id: DeviceId, payload: Payload) -> Result<(), ProtocolError> {
