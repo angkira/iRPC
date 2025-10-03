@@ -37,14 +37,22 @@ impl Joint {
     ///
     /// ```no_run
     /// use irpc::{Joint, transport::CanFdConfig};
+    /// use embassy_stm32::{bind_interrupts, can, peripherals};
+    ///
+    /// // Define interrupt handlers
+    /// bind_interrupts!(struct Irqs {
+    ///     FDCAN1_IT0 => can::IT0InterruptHandler<peripherals::FDCAN1>;
+    ///     FDCAN1_IT1 => can::IT1InterruptHandler<peripherals::FDCAN1>;
+    /// });
     ///
     /// let config = CanFdConfig::for_joint(0x0010);
     ///
     /// let (mut joint, mut transport) = Joint::with_canfd(
     ///     0x0010,
     ///     peripherals.FDCAN1,
-    ///     peripherals.PA12,  // TX
     ///     peripherals.PA11,  // RX
+    ///     peripherals.PA12,  // TX
+    ///     Irqs,
     ///     config,
     /// ).expect("CAN-FD init");
     ///
@@ -57,20 +65,24 @@ impl Joint {
     /// }
     /// ```
     #[cfg(feature = "stm32g4")]
-    pub fn with_canfd<'d, T, TX, RX>(
+    pub fn with_canfd<'d, T, TX, RX, I>(
         device_id: DeviceId,
-        fdcan: impl embassy_stm32::Peripheral<P = T> + 'd,
-        tx_pin: TX,
-        rx_pin: RX,
+        fdcan: embassy_stm32::Peri<'d, T>,
+        rx_pin: embassy_stm32::Peri<'d, RX>,
+        tx_pin: embassy_stm32::Peri<'d, TX>,
+        irqs: I,
         config: crate::transport::CanFdConfig,
-    ) -> Result<(Self, crate::transport::CanFdTransport<'d, T>), crate::transport::CanError>
+    ) -> Result<(Self, crate::transport::CanFdTransport<'d>), crate::transport::CanError>
     where
-        T: embassy_stm32::can::fdcan::Instance,
-        TX: embassy_stm32::can::fdcan::TxPin<T> + 'd,
-        RX: embassy_stm32::can::fdcan::RxPin<T> + 'd,
+        T: embassy_stm32::can::Instance,
+        TX: embassy_stm32::can::TxPin<T>,
+        RX: embassy_stm32::can::RxPin<T>,
+        I: embassy_stm32::interrupt::typelevel::Binding<T::IT0Interrupt, embassy_stm32::can::IT0InterruptHandler<T>>
+            + embassy_stm32::interrupt::typelevel::Binding<T::IT1Interrupt, embassy_stm32::can::IT1InterruptHandler<T>>
+            + 'd,
     {
         let joint = Self::new(device_id);
-        let transport = crate::transport::CanFdTransport::new(fdcan, tx_pin, rx_pin, config)?;
+        let transport = crate::transport::CanFdTransport::new(fdcan, rx_pin, tx_pin, irqs, config)?;
 
         Ok((joint, transport))
     }

@@ -41,15 +41,15 @@ use {
     defmt_rtt as _,
     panic_probe as _,
     embassy_executor::Spawner,
-    embassy_stm32::{self as _, bind_interrupts, can::fdcan, peripherals, Config},
+    embassy_stm32::{self as _, bind_interrupts, can, peripherals, Config},
     embassy_time::Timer,
     irpc::{Joint, transport::{CanFdConfig, CanFdTransport}},
 };
 
 #[cfg(feature = "stm32g4")]
 bind_interrupts!(struct Irqs {
-    FDCAN1_IT0 => fdcan::IT0InterruptHandler<peripherals::FDCAN1>;
-    FDCAN1_IT1 => fdcan::IT1InterruptHandler<peripherals::FDCAN1>;
+    FDCAN1_IT0 => can::IT0InterruptHandler<peripherals::FDCAN1>;
+    FDCAN1_IT1 => can::IT1InterruptHandler<peripherals::FDCAN1>;
 });
 
 #[cfg(feature = "stm32g4")]
@@ -90,8 +90,9 @@ async fn main(_spawner: Spawner) {
     let (mut joint, mut transport) = Joint::with_canfd(
         0x0010,
         p.FDCAN1,
-        p.PA12,  // TX
         p.PA11,  // RX
+        p.PA12,  // TX
+        Irqs,    // Interrupt handlers
         config,
     ).expect("❌ CAN-FD initialization failed");
 
@@ -99,18 +100,24 @@ async fn main(_spawner: Spawner) {
 
     // 4. Main control loop (EXTREMELY SIMPLE)
     loop {
-        // Check for incoming messages
-        if let Ok(Some(msg)) = transport.receive_message() {
-            defmt::debug!("📨 RX: {:?}", msg.payload);
+        // Wait for incoming messages
+        match transport.receive_message().await {
+            Ok(msg) => {
+                defmt::debug!("📨 RX: {:?}", msg.payload);
 
-            // Process through state machine
-            if let Some(response) = joint.handle_message(&msg) {
-                defmt::debug!("📤 TX: {:?}", response.payload);
+                // Process through state machine
+                if let Some(response) = joint.handle_message(&msg) {
+                    defmt::debug!("📤 TX: {:?}", response.payload);
 
-                // Send response
-                if let Err(e) = transport.send_message(&response) {
-                    defmt::error!("❌ TX failed: {:?}", e);
+                    // Send response
+                    if let Err(e) = transport.send_message(&response).await {
+                        defmt::error!("❌ TX failed: {:?}", e);
+                    }
                 }
+            }
+            Err(e) => {
+                defmt::error!("❌ RX failed: {:?}", e);
+                Timer::after_millis(10).await;
             }
         }
 
@@ -119,8 +126,6 @@ async fn main(_spawner: Spawner) {
         // - Update motor control
         // - Send telemetry
         // - etc.
-
-        Timer::after_millis(1).await;
     }
 }
 

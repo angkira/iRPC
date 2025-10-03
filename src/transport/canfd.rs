@@ -40,12 +40,6 @@
 //! }
 //! ```
 
-#[cfg(not(feature = "arm_api"))]
-extern crate alloc;
-
-#[cfg(not(feature = "arm_api"))]
-use alloc::vec::Vec;
-
 use crate::protocol::{Message, DeviceId};
 
 // Maximum CAN-FD frame payload (64 bytes)
@@ -130,25 +124,22 @@ pub enum CanError {
 // ============================================================================
 
 #[cfg(feature = "stm32g4")]
-use embassy_stm32::can::fdcan::{Fdcan, Instance as FdcanInstance};
-
-#[cfg(feature = "stm32g4")]
-use embassy_stm32::peripherals::FDCAN1;
+use embassy_stm32::can::{Can, Instance};
 
 /// CAN-FD transport for STM32G4 microcontrollers
 ///
 /// This transport handles all FDCAN hardware configuration and provides
 /// automatic message serialization/deserialization.
 #[cfg(feature = "stm32g4")]
-pub struct CanFdTransport<'d, T: FdcanInstance> {
-    fdcan: Fdcan<'d, T>,
+pub struct CanFdTransport<'d> {
+    can: Can<'d>,
     node_id: DeviceId,
     rx_buffer: [u8; MAX_FDCAN_PAYLOAD],
     tx_buffer: [u8; MAX_FDCAN_PAYLOAD],
 }
 
 #[cfg(feature = "stm32g4")]
-impl<'d, T: FdcanInstance> CanFdTransport<'d, T> {
+impl<'d> CanFdTransport<'d> {
     /// Create and configure a new CAN-FD transport
     ///
     /// This function:
@@ -167,41 +158,44 @@ impl<'d, T: FdcanInstance> CanFdTransport<'d, T> {
     /// # Returns
     ///
     /// Returns `Ok(transport)` if successful, `Err(CanError)` otherwise.
-    pub fn new<TX, RX>(
-        fdcan: impl embassy_stm32::Peripheral<P = T> + 'd,
-        tx_pin: TX,
-        rx_pin: RX,
+    pub fn new<T, TX, RX, I>(
+        fdcan: embassy_stm32::Peri<'d, T>,
+        rx_pin: embassy_stm32::Peri<'d, RX>,
+        tx_pin: embassy_stm32::Peri<'d, TX>,
+        irqs: I,
         config: CanFdConfig,
     ) -> Result<Self, CanError>
     where
-        TX: embassy_stm32::can::fdcan::TxPin<T> + 'd,
-        RX: embassy_stm32::can::fdcan::RxPin<T> + 'd,
+        T: Instance,
+        TX: embassy_stm32::can::TxPin<T>,
+        RX: embassy_stm32::can::RxPin<T>,
+        I: embassy_stm32::interrupt::typelevel::Binding<T::IT0Interrupt, embassy_stm32::can::IT0InterruptHandler<T>>
+            + embassy_stm32::interrupt::typelevel::Binding<T::IT1Interrupt, embassy_stm32::can::IT1InterruptHandler<T>>
+            + 'd,
     {
-        use embassy_stm32::can::fdcan::{config::FdCanConfig, filter::*};
+        use embassy_stm32::can;
 
-        // Configure FDCAN
-        let mut fdcan_config = FdCanConfig::default();
+        // Create configurator
+        let mut can_config = can::CanConfigurator::new(fdcan, rx_pin, tx_pin, irqs);
 
-        // Enable FD mode with bit rate switching
-        fdcan_config.mode = embassy_stm32::can::fdcan::config::OperatingMode::NormalOperationMode;
+        // Set bitrates
+        can_config.set_bitrate(config.nominal_bitrate);
 
-        // TODO: Calculate bit timing from bitrates
-        // For now, use default timing (requires embassy-stm32 update for dynamic calculation)
-
-        let mut fdcan = Fdcan::new(fdcan, rx_pin, tx_pin, fdcan_config);
+        // Enable FD mode with higher data bitrate
+        can_config.set_fd_data_bitrate(config.data_bitrate, true);
 
         // Configure filters to accept messages for this node
-        // Standard ID filter: accept messages with ID = node_id
-        fdcan.set_standard_filter(
-            StandardFilterSlot::_0,
-            StandardFilter::accept_masked_id(config.node_id as u32, 0x7FF),
+        // Accept all messages into FIFO0 for now (we'll filter by ID in software)
+        can_config.properties().set_extended_filter(
+            can::filter::ExtendedFilterSlot::_0,
+            can::filter::ExtendedFilter::accept_all_into_fifo0(),
         );
 
-        // Start FDCAN
-        fdcan.enable();
+        // Start in normal operation mode
+        let can = can_config.start(can::OperatingMode::NormalOperationMode);
 
         Ok(Self {
-            fdcan,
+            can,
             node_id: config.node_id,
             rx_buffer: [0u8; MAX_FDCAN_PAYLOAD],
             tx_buffer: [0u8; MAX_FDCAN_PAYLOAD],
@@ -211,7 +205,7 @@ impl<'d, T: FdcanInstance> CanFdTransport<'d, T> {
     /// Send a message over CAN-FD
     ///
     /// Automatically serializes the message and transmits over CAN-FD.
-    pub fn send_message(&mut self, message: &Message) -> Result<(), CanError> {
+    pub async fn send_message(&mut self, message: &Message) -> Result<(), CanError> {
         // Serialize message
         let data = message.serialize()
             .map_err(|_| CanError::SerializationError)?;
@@ -223,49 +217,39 @@ impl<'d, T: FdcanInstance> CanFdTransport<'d, T> {
         // Copy to TX buffer
         self.tx_buffer[..data.len()].copy_from_slice(&data);
 
-        // Create CAN frame with node ID
-        use embassy_stm32::can::fdcan::frame::{FrameFormat, TxFrameHeader};
-        use embassy_stm32::can::fdcan::id::StandardId;
+        // Create CAN-FD frame with standard ID
+        use embassy_stm32::can::frame::FdFrame;
 
-        let header = TxFrameHeader {
-            id: StandardId::new(self.node_id).unwrap().into(),
-            len: data.len() as u8,
-            frame_format: FrameFormat::Fdcan,
-            bit_rate_switching: true,
-            marker: None,
-        };
+        let frame = FdFrame::new_standard(self.node_id, &self.tx_buffer[..data.len()])
+            .map_err(|_| CanError::InvalidConfig)?;
 
-        // Transmit (blocking for now)
-        self.fdcan.write(&header, &self.tx_buffer[..data.len()])
-            .map_err(|_| CanError::TxFailed)?;
+        // Transmit (async)
+        self.can.write_fd(&frame).await;
 
         Ok(())
     }
 
     /// Receive a message from CAN-FD
     ///
-    /// Returns `Ok(Some(message))` if a message was received,
-    /// `Ok(None)` if no message is available.
-    pub fn receive_message(&mut self) -> Result<Option<Message>, CanError> {
-        // Try to receive a frame (non-blocking)
-        match self.fdcan.read() {
-            Ok(envelope) => {
-                let len = envelope.header.len as usize;
+    /// Waits for a message to be received.
+    pub async fn receive_message(&mut self) -> Result<Message, CanError> {
+        // Receive a frame (async)
+        let envelope = self.can.read_fd().await
+            .map_err(|_| CanError::RxFailed)?;
 
-                if len > MAX_FDCAN_PAYLOAD {
-                    return Err(CanError::FrameTooLarge);
-                }
+        let rx_frame = envelope.frame;
+        let len = rx_frame.header().len() as usize;
 
-                // Copy data to RX buffer
-                self.rx_buffer[..len].copy_from_slice(&envelope.data[..len]);
-
-                // Deserialize
-                Message::deserialize(&self.rx_buffer[..len])
-                    .map(Some)
-                    .map_err(|_| CanError::DeserializationError)
-            }
-            Err(_) => Ok(None), // No data available
+        if len > MAX_FDCAN_PAYLOAD {
+            return Err(CanError::FrameTooLarge);
         }
+
+        // Copy data to RX buffer
+        self.rx_buffer[..len].copy_from_slice(&rx_frame.data()[..len]);
+
+        // Deserialize
+        Message::deserialize(&self.rx_buffer[..len])
+            .map_err(|_| CanError::DeserializationError)
     }
 
     /// Check if transport is ready
