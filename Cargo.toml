@@ -18,8 +18,8 @@ arm_api = ["async-trait", "tokio", "tracing", "thiserror", "postcard/use-std"]
 joint_api = []
 
 # Hardware-specific transport implementations (require joint_api)
-stm32g4 = ["joint_api", "embassy-stm32", "embassy-time"]
-stm32f4 = ["joint_api", "embassy-stm32", "embassy-time"]
+stm32g4 = ["joint_api", "embassy-stm32", "embassy-stm32/stm32g431cb", "embassy-time", "embassy-time/tick-hz-32_768"]
+stm32f4 = ["joint_api", "embassy-stm32", "embassy-stm32/stm32f446re", "embassy-time", "embassy-time/tick-hz-32_768"]
 # Future: stm32h7, rp2040, nrf52, etc.
 
 [dependencies]
