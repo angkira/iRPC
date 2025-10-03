@@ -1,8 +1,9 @@
-#![cfg_attr(not(feature = "std"), no_std)]
-
 use crate::protocol::{DeviceId, LifecycleState, Message, Payload, Header};
 
 /// Represents a single joint on the embedded device, driven by a state machine.
+///
+/// This is the firmware-side implementation that processes incoming commands
+/// and enforces lifecycle state transitions. Designed for `no_std` embedded use.
 pub struct Joint {
     id: DeviceId,
     state: LifecycleState,
@@ -16,10 +17,62 @@ impl Joint {
             state: LifecycleState::Unconfigured,
         }
     }
-    
+
     /// Returns the current lifecycle state of the Joint.
     pub fn state(&self) -> LifecycleState {
         self.state
+    }
+
+    /// Get the joint ID
+    pub fn id(&self) -> DeviceId {
+        self.id
+    }
+
+    /// Create a Joint with CAN-FD transport (STM32G4 only)
+    ///
+    /// This is a convenience constructor that creates both the Joint state machine
+    /// and the CAN-FD transport, fully configured and ready to use.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use irpc::{Joint, transport::CanFdConfig};
+    ///
+    /// let config = CanFdConfig::for_joint(0x0010);
+    ///
+    /// let (mut joint, mut transport) = Joint::with_canfd(
+    ///     0x0010,
+    ///     peripherals.FDCAN1,
+    ///     peripherals.PA12,  // TX
+    ///     peripherals.PA11,  // RX
+    ///     config,
+    /// ).expect("CAN-FD init");
+    ///
+    /// loop {
+    ///     if let Some(msg) = transport.receive_message()? {
+    ///         if let Some(resp) = joint.handle_message(&msg) {
+    ///             transport.send_message(&resp)?;
+    ///         }
+    ///     }
+    /// }
+    /// ```
+    #[cfg(feature = "stm32g4")]
+    pub fn with_canfd<'d, T, TX, RX>(
+        device_id: DeviceId,
+        fdcan: impl embassy_stm32::Peripheral<P = T> + 'd,
+        tx_pin: TX,
+        rx_pin: RX,
+        config: crate::transport::CanFdConfig,
+    ) -> Result<(Self, crate::transport::CanFdTransport<'d, T>), crate::transport::CanError>
+    where
+        T: embassy_stm32::can::fdcan::Instance,
+        TX: embassy_stm32::can::fdcan::TxPin<T> + 'd,
+        RX: embassy_stm32::can::fdcan::RxPin<T> + 'd,
+    {
+        let joint = Self::new(device_id);
+        let transport = crate::transport::CanFdTransport::new(fdcan, tx_pin, rx_pin, config)?;
+
+        Ok((joint, transport))
     }
 
     /// The core state machine logic. Processes an incoming message and returns a response.
@@ -101,5 +154,65 @@ impl Joint {
             },
             payload,
         })
+    }
+}
+
+// ============================================================================
+// Transport integration helpers (joint_api only)
+// ============================================================================
+
+#[cfg(feature = "joint_api")]
+use crate::bus::{TransportLayer, EmbeddedTransport, TransportError};
+
+#[cfg(feature = "joint_api")]
+impl Joint {
+    /// Process incoming messages from transport and send responses automatically
+    ///
+    /// This is a convenience method that combines receive, handle, and send operations.
+    /// It polls the transport, processes any received message through the state machine,
+    /// and automatically sends the response if one is generated.
+    ///
+    /// # Example
+    /// ```no_run
+    /// use irpc::{Joint, TransportLayer};
+    ///
+    /// let mut joint = Joint::new(0x0010);
+    /// let mut transport = TransportLayer::new(my_can_bus);
+    ///
+    /// loop {
+    ///     // Process one message (if available) and send response
+    ///     if let Err(e) = joint.process_transport(&mut transport) {
+    ///         // Handle transport error
+    ///     }
+    /// }
+    /// ```
+    pub fn process_transport<T: EmbeddedTransport>(
+        &mut self,
+        transport: &mut TransportLayer<T>,
+    ) -> Result<bool, TransportError<T::Error>> {
+        // Try to receive a message
+        if let Some(msg) = transport.receive_message()? {
+            // Process it through the state machine
+            if let Some(response) = self.handle_message(&msg) {
+                // Send the response
+                transport.send_message(&response)?;
+                return Ok(true); // Message was processed
+            }
+        }
+        Ok(false) // No message or not for us
+    }
+
+    /// Convenience method: receive and handle message (without auto-response)
+    ///
+    /// This allows you to control when/how responses are sent.
+    pub fn receive_and_handle<T: EmbeddedTransport>(
+        &mut self,
+        transport: &mut TransportLayer<T>,
+    ) -> Result<Option<Message>, TransportError<T::Error>> {
+        if let Some(msg) = transport.receive_message()? {
+            Ok(self.handle_message(&msg))
+        } else {
+            Ok(None)
+        }
     }
 }
