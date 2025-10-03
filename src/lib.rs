@@ -22,10 +22,20 @@ pub mod arm;
 #[cfg(feature = "joint_api")]
 pub mod joint;
 
+// Concrete transport implementations (joint_api only)
+#[cfg(feature = "joint_api")]
+pub mod transport;
+
 // Re-export commonly used types
 pub use config::*;
 pub use protocol::*;
-pub use bus::*;
+
+// Re-export bus types based on features
+#[cfg(feature = "arm_api")]
+pub use bus::{CommunicationAdapter, DeviceInfo};
+
+#[cfg(feature = "joint_api")]
+pub use bus::{EmbeddedTransport, TransportLayer, TransportError, DeviceInfo};
 
 #[cfg(feature = "arm_api")]
 pub use arm::*;
