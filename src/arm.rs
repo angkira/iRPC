@@ -21,11 +21,15 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 /// Asynchronous communication manager for ARM systems
+///
+/// Manages message routing, timeouts, and response correlation for the iRPC protocol.
+/// This is the core async I/O handler that runs as a background task.
 #[cfg(feature = "arm_api")]
 pub struct CommunicationManager {
     message_id_counter: AtomicU32,
     pending_responses: Arc<RwLock<HashMap<MessageId, tokio::sync::oneshot::Sender<Message>>>>,
     outbound_tx: mpsc::UnboundedSender<Message>,
+    #[allow(dead_code)]
     inbound_rx: Arc<RwLock<mpsc::UnboundedReceiver<Message>>>,
 }
 
@@ -70,7 +74,7 @@ impl CommunicationManager {
         };
         
         // Send message
-        if let Err(_) = self.outbound_tx.send(message) {
+        if self.outbound_tx.send(message).is_err() {
             // Remove the pending response entry on send failure
             let mut pending = self.pending_responses.write().await;
             pending.remove(&msg_id);
@@ -93,7 +97,7 @@ impl CommunicationManager {
                 Err(ProtocolError::Timeout)
             }
         }
-    
+    }
     /// Send a message without waiting for response
     pub async fn send_fire_and_forget(&self, target_id: DeviceId, payload: Payload) -> Result<(), ProtocolError> {
         let msg_id = self.next_message_id();
@@ -118,7 +122,7 @@ impl CommunicationManager {
         // Check if this is a response to a pending request
         let mut pending = self.pending_responses.write().await;
         if let Some(tx) = pending.remove(&msg_id) {
-            if let Err(_) = tx.send(message) {
+            if tx.send(message).is_err() {
                 warn!("Failed to deliver response for message {}", msg_id);
             }
         } else {
@@ -129,6 +133,9 @@ impl CommunicationManager {
 }
 
 /// High-level interface for interacting with a single joint
+///
+/// Provides a gRPC-like API for controlling a remote joint device.
+/// All methods are async and handle communication transparently.
 #[cfg(feature = "arm_api")]
 pub struct JointProxy {
     joint_id: DeviceId,
