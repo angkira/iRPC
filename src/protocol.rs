@@ -168,6 +168,73 @@ pub struct ConfigureTelemetryPayload {
     pub change_threshold: f32,
 }
 
+/// Stall detection status
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum StallStatus {
+    /// Normal operation
+    Normal = 0,
+    /// Warning: high load, might stall
+    Warning = 1,
+    /// Stalled: motor cannot move
+    Stalled = 2,
+}
+
+/// Configure adaptive control features (v2.0 - Phase 3)
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct ConfigureAdaptivePayload {
+    /// Enable coolStep (adaptive current reduction)
+    pub coolstep_enable: bool,
+    /// Minimum current percentage for coolStep (0.0-1.0)
+    pub coolstep_min_current: f32,
+    /// Load threshold for current reduction start (%)
+    pub coolstep_threshold: f32,
+    
+    /// Enable dcStep (load-adaptive velocity derating)
+    pub dcstep_enable: bool,
+    /// Load threshold to start velocity derating (%)
+    pub dcstep_threshold: f32,
+    /// Maximum velocity derating factor (0.0-1.0)
+    pub dcstep_max_derating: f32,
+    
+    /// Enable stallGuard (sensorless stall detection)
+    pub stallguard_enable: bool,
+    /// Current threshold for stall detection (A)
+    pub stallguard_current_threshold: f32,
+    /// Velocity threshold for stall detection (deg/s)
+    pub stallguard_velocity_threshold: f32,
+}
+
+/// Adaptive control status telemetry (v2.0 - Phase 3)
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct AdaptiveStatusPayload {
+    /// Estimated load percentage (0-100%)
+    pub load_percent: f32,
+    
+    /// coolStep current scaling factor (0.0-1.0)
+    pub current_scale: f32,
+    /// coolStep enabled
+    pub coolstep_enabled: bool,
+    /// Power savings percentage from coolStep (0-100%)
+    pub power_savings_percent: f32,
+    /// Total energy saved (Watt-hours)
+    pub energy_saved_wh: f32,
+    
+    /// dcStep velocity scaling factor (0.0-1.0)
+    pub velocity_scale: f32,
+    /// dcStep enabled
+    pub dcstep_enabled: bool,
+    /// dcStep derating active
+    pub dcstep_derating: bool,
+    
+    /// stallGuard status
+    pub stall_status: StallStatus,
+    /// stallGuard enabled
+    pub stallguard_enabled: bool,
+    /// Stall detection confidence (0-100%)
+    pub stall_confidence: f32,
+}
+
 /// Message payload variants for the iRPC protocol
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Payload {
@@ -202,6 +269,14 @@ pub enum Payload {
     ConfigureTelemetry(ConfigureTelemetryPayload),
     /// Request immediate telemetry (for OnDemand mode)
     RequestTelemetry,
+
+    // Adaptive Control Configuration & Status (v2.0 - Phase 3)
+    /// Configure adaptive control features (coolStep, dcStep, stallGuard)
+    ConfigureAdaptive(ConfigureAdaptivePayload),
+    /// Request immediate adaptive status
+    RequestAdaptiveStatus,
+    /// Adaptive control status telemetry
+    AdaptiveStatus(AdaptiveStatusPayload),
 
     // Bidirectional Management
     /// Acknowledgment of successful command
