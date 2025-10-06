@@ -80,13 +80,92 @@ pub enum MotionProfile {
     Adaptive = 2,
 }
 
-/// Encoder telemetry data from a joint
+/// Encoder telemetry data from a joint (v1.0 - basic)
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 pub struct EncoderTelemetry {
     /// Current position in degrees
     pub position: f32,
     /// Current velocity in degrees/second
     pub velocity: f32,
+}
+
+/// Comprehensive telemetry stream (v2.0)
+///
+/// Size: 64 bytes (struct) + ~10 bytes (postcard) = ~74 bytes
+/// Fits in CAN-FD frame (64 bytes data payload)
+///
+/// At 1 kHz streaming:
+/// - Bandwidth: 74 bytes * 8 * 1000 = 592 kbps
+/// - CAN-FD usage: 592 / 5000 = 11.8% (plenty of headroom)
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct TelemetryStream {
+    /// Timestamp in microseconds since boot
+    pub timestamp_us: u64,
+    
+    // Motion state
+    /// Current position in degrees
+    pub position: f32,
+    /// Current velocity in degrees/second
+    pub velocity: f32,
+    /// Current acceleration in degrees/second² (calculated)
+    pub acceleration: f32,
+    
+    // FOC state (Clarke-Park transformed currents/voltages)
+    /// D-axis current in amperes
+    pub current_d: f32,
+    /// Q-axis current in amperes (torque-producing)
+    pub current_q: f32,
+    /// D-axis voltage in volts
+    pub voltage_d: f32,
+    /// Q-axis voltage in volts
+    pub voltage_q: f32,
+    
+    // Derived metrics
+    /// Estimated torque in Newton-meters
+    pub torque_estimate: f32,
+    /// Electrical power in watts
+    pub power: f32,
+    /// Load percentage (0-100%)
+    pub load_percent: f32,
+    
+    // Performance metrics
+    /// FOC loop execution time in microseconds
+    pub foc_loop_time_us: u16,
+    /// Motor/driver temperature in Celsius
+    pub temperature_c: f32,
+    
+    // Status flags
+    /// Warning flags bitmap
+    pub warnings: u16,
+    /// Is trajectory currently active?
+    pub trajectory_active: bool,
+}
+
+/// Telemetry streaming mode
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum TelemetryMode {
+    /// Send telemetry only on explicit request
+    OnDemand = 0,
+    /// Send periodically at configured rate
+    Periodic = 1,
+    /// Continuous streaming at maximum rate (1 kHz)
+    Streaming = 2,
+    /// Send only when values change significantly
+    OnChange = 3,
+    /// Adapt rate based on motion activity
+    Adaptive = 4,
+}
+
+/// Configure telemetry streaming
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct ConfigureTelemetryPayload {
+    /// Streaming mode
+    pub mode: TelemetryMode,
+    /// Update rate in Hz (for Periodic mode, 0 = use default)
+    pub rate_hz: u16,
+    /// Change threshold (for OnChange mode, 0.0 = use default)
+    pub change_threshold: f32,
 }
 
 /// Message payload variants for the iRPC protocol
@@ -108,11 +187,21 @@ pub enum Payload {
     /// Set target with motion profiling (enhanced version)
     SetTargetV2(SetTargetPayloadV2),
 
-    // Joint → Arm Telemetry & Status
-    /// Encoder position and velocity data
+    // Joint → Arm Telemetry & Status (v1.0)
+    /// Encoder position and velocity data (basic)
     Encoder(EncoderTelemetry),
     /// Joint status update with state and error code
     JointStatus { state: LifecycleState, error_code: u16 },
+    
+    // Joint → Arm Telemetry & Status (v2.0)
+    /// Comprehensive telemetry stream
+    TelemetryStream(TelemetryStream),
+    
+    // Telemetry Configuration (v2.0)
+    /// Configure telemetry streaming mode
+    ConfigureTelemetry(ConfigureTelemetryPayload),
+    /// Request immediate telemetry (for OnDemand mode)
+    RequestTelemetry,
 
     // Bidirectional Management
     /// Acknowledgment of successful command
