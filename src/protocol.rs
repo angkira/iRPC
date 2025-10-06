@@ -35,13 +35,49 @@ pub enum LifecycleState {
     Error,
 }
 
-/// Target position and velocity for joint motion
+/// Target position and velocity for joint motion (v1.0)
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 pub struct SetTargetPayload {
     /// Target angle in degrees
     pub target_angle: f32,
     /// Maximum velocity limit in degrees/second
     pub velocity_limit: f32,
+}
+
+/// Enhanced target with motion profiling (v2.0)
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct SetTargetPayloadV2 {
+    /// Target angle in degrees
+    pub target_angle: f32,
+    /// Maximum velocity in degrees/second
+    pub max_velocity: f32,
+    /// Target velocity at end point (for fly-by waypoints) in degrees/second
+    pub target_velocity: f32,
+    /// Maximum acceleration in degrees/second²
+    pub max_acceleration: f32,
+    /// Maximum deceleration in degrees/second²
+    pub max_deceleration: f32,
+    /// Maximum jerk (optional, for S-curve) in degrees/second³
+    /// Use 0.0 or negative value to disable jerk limiting
+    pub max_jerk: f32,
+    /// Motion profile type to use
+    pub profile: MotionProfile,
+    /// Maximum current limit (optional, use 0.0 to disable) in amperes
+    pub max_current: f32,
+    /// Maximum temperature limit (optional, use 0.0 to disable) in celsius
+    pub max_temperature: f32,
+}
+
+/// Motion profile type for trajectory generation
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum MotionProfile {
+    /// Trapezoidal velocity profile - constant acceleration/deceleration
+    Trapezoidal = 0,
+    /// S-curve velocity profile - jerk-limited for smooth motion
+    SCurve = 1,
+    /// Adaptive profile - adjusts to load conditions (future)
+    Adaptive = 2,
 }
 
 /// Encoder telemetry data from a joint
@@ -56,7 +92,7 @@ pub struct EncoderTelemetry {
 /// Message payload variants for the iRPC protocol
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Payload {
-    // Arm → Joint Commands
+    // Arm → Joint Commands (v1.0)
     /// Set target position and velocity (only valid in Active state)
     SetTarget(SetTargetPayload),
     /// Configure the joint (Unconfigured → Inactive)
@@ -67,6 +103,10 @@ pub enum Payload {
     Deactivate,
     /// Reset the joint to Unconfigured state
     Reset,
+
+    // Arm → Joint Commands (v2.0)
+    /// Set target with motion profiling (enhanced version)
+    SetTargetV2(SetTargetPayloadV2),
 
     // Joint → Arm Telemetry & Status
     /// Encoder position and velocity data

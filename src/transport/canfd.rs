@@ -90,6 +90,7 @@ pub struct CanFdPins<TX, RX> {
 
 /// CAN-FD transport errors
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub enum CanError {
     /// Peripheral not initialized
     NotInitialized,

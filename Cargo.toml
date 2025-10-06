@@ -18,8 +18,8 @@ arm_api = ["async-trait", "tokio", "tracing", "thiserror", "postcard/use-std"]
 joint_api = []
 
 # Hardware-specific transport implementations (require joint_api)
-stm32g4 = ["joint_api", "embassy-stm32", "embassy-stm32/stm32g431cb", "embassy-time", "embassy-time/tick-hz-32_768"]
-stm32f4 = ["joint_api", "embassy-stm32", "embassy-stm32/stm32f446re", "embassy-time", "embassy-time/tick-hz-32_768"]
+stm32g4 = ["joint_api", "embassy-stm32", "embassy-stm32/stm32g431cb", "embassy-time", "embassy-time/tick-hz-32_768", "defmt"]
+stm32f4 = ["joint_api", "embassy-stm32", "embassy-stm32/stm32f446re", "embassy-time", "embassy-time/tick-hz-32_768", "defmt"]
 # Future: stm32h7, rp2040, nrf52, etc.
 
 [dependencies]
@@ -36,6 +36,7 @@ thiserror = { version = "2.0", optional = true }
 # Optional embedded HAL dependencies (for concrete transports)
 embassy-stm32 = { version = "0.4", optional = true, default-features = false }
 embassy-time = { version = "0.5", optional = true, default-features = false }
+defmt = { version = "1.0", optional = true }
 
 [dev-dependencies]
 tokio-test = "0.4"
