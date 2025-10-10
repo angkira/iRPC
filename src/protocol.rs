@@ -21,18 +21,22 @@ pub type MessageId = u32;
 /// - Unconfigured → Inactive (via Configure)
 /// - Inactive → Active (via Activate)
 /// - Active → Inactive (via Deactivate)
+/// - Active → Calibrating (via StartCalibration)
+/// - Calibrating → Active (via calibration completion)
 /// - Any → Unconfigured (via Reset)
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum LifecycleState {
     /// Joint is not configured and cannot accept commands
-    Unconfigured,
+    Unconfigured = 0,
     /// Joint is configured but not ready for motion
-    Inactive,
+    Inactive = 1,
     /// Joint is active and can execute motion commands
-    Active,
+    Active = 2,
+    /// Joint is performing automatic calibration
+    Calibrating = 3,
     /// Joint is in error state
-    Error,
+    Error = 4,
 }
 
 /// Target position and velocity for joint motion (v1.0)
@@ -235,6 +239,116 @@ pub struct AdaptiveStatusPayload {
     pub stall_confidence: f32,
 }
 
+/// Calibration request configuration
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+pub struct CalibrationRequest {
+    /// Phases to run (bitmask: bit 0 = Inertia, bit 1 = Friction, bit 2 = TorqueConstant, bit 3 = Damping, bit 4 = Validation)
+    pub phases: u8,
+    /// Maximum test current (A)
+    pub max_current: f32,
+    /// Maximum test velocity (rad/s)
+    pub max_velocity: f32,
+    /// Maximum position excursion from start (rad)
+    pub max_position_range: f32,
+    /// Safety timeout per phase (seconds)
+    pub phase_timeout: f32,
+    /// Return to home after completion
+    pub return_home: bool,
+}
+
+impl Default for CalibrationRequest {
+    fn default() -> Self {
+        Self {
+            phases: 0b11111,  // All phases
+            max_current: 8.0,
+            max_velocity: 5.0,
+            max_position_range: 3.14,  // ±180°
+            phase_timeout: 60.0,
+            return_home: true,
+        }
+    }
+}
+
+/// Calibration phase identifiers
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum CalibrationPhase {
+    Idle = 0,
+    InertiaTest = 1,
+    FrictionTest = 2,
+    TorqueConstantVerification = 3,
+    DampingTest = 4,
+    Validation = 5,
+    Complete = 6,
+    Failed = 7,
+}
+
+/// Calibration status update (sent periodically during calibration)
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct CalibrationStatus {
+    /// Current calibration phase
+    pub phase: CalibrationPhase,
+    /// Progress within current phase (0.0 - 1.0)
+    pub progress: f32,
+    /// Estimated time remaining (seconds)
+    pub time_remaining: f32,
+    /// Current position (rad)
+    pub current_position: f32,
+    /// Current velocity (rad/s)
+    pub current_velocity: f32,
+    /// Current test current (A)
+    pub current_iq: f32,
+}
+
+/// Identified motor parameters
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct MotorParameters {
+    /// Rotor inertia (kg·m²)
+    pub inertia_J: f32,
+    /// Torque constant (Nm/A)
+    pub torque_constant_kt: f32,
+    /// Viscous damping (Nm·s/rad)
+    pub damping_b: f32,
+    /// Coulomb friction (Nm)
+    pub friction_coulomb: f32,
+    /// Stribeck friction amplitude (Nm)
+    pub friction_stribeck: f32,
+    /// Stribeck velocity (rad/s)
+    pub friction_vstribeck: f32,
+    /// Viscous friction coefficient (Nm·s/rad)
+    pub friction_viscous: f32,
+}
+
+/// Calibration confidence metrics
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct CalibrationConfidence {
+    /// Overall confidence (0.0 - 1.0)
+    pub overall: f32,
+    /// Inertia confidence (based on measurement variance)
+    pub inertia: f32,
+    /// Friction model fit quality (R² score)
+    pub friction: f32,
+    /// Torque constant confidence
+    pub torque_constant: f32,
+    /// Validation tracking RMS error (rad)
+    pub validation_rms: f32,
+}
+
+/// Calibration result
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct CalibrationResult {
+    /// Calibration success flag
+    pub success: bool,
+    /// Identified motor parameters
+    pub parameters: MotorParameters,
+    /// Confidence metrics
+    pub confidence: CalibrationConfidence,
+    /// Total calibration time (seconds)
+    pub total_time: f32,
+    /// Error code (0 = success, non-zero = error)
+    pub error_code: u16,
+}
+
 /// Message payload variants for the iRPC protocol
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Payload {
@@ -277,6 +391,16 @@ pub enum Payload {
     RequestAdaptiveStatus,
     /// Adaptive control status telemetry
     AdaptiveStatus(AdaptiveStatusPayload),
+
+    // Motor Calibration (v2.1) - Phase 6
+    /// Start automatic motor parameter calibration
+    StartCalibration(CalibrationRequest),
+    /// Stop/abort ongoing calibration
+    StopCalibration,
+    /// Calibration status update (Joint → Arm, sent every 100ms during calibration)
+    CalibrationStatus(CalibrationStatus),
+    /// Calibration final result (Joint → Arm, sent once at end)
+    CalibrationResult(CalibrationResult),
 
     // Bidirectional Management
     /// Acknowledgment of successful command

@@ -108,6 +108,55 @@ async fn main() {
 
 -----
 
+## Motor Calibration (v2.1)
+
+Automatic motor parameter identification through controlled tests:
+
+```rust
+use irpc::protocol::*;
+
+// Configure calibration
+let request = CalibrationRequest {
+    phases: 0b11111,  // All phases
+    max_current: 8.0,
+    max_velocity: 5.0,
+    max_position_range: 3.14,
+    phase_timeout: 60.0,
+    return_home: true,
+};
+
+// Send command
+let msg = Message {
+    header: Header {
+        source_id: 0x0000,
+        target_id: 0x0010,
+        msg_id: 1,
+    },
+    payload: Payload::StartCalibration(request),
+};
+
+// Monitor progress
+// Joint will send CalibrationStatus every 100ms
+// Joint will send CalibrationResult at completion
+```
+
+**Identified Parameters:**
+- Rotor inertia (J)
+- Torque constant (kt)
+- Viscous damping (b)
+- Stribeck friction model (τ_c, τ_s, v_s, b_f)
+
+**Calibration Phases:**
+1. Inertia Test - Identifies rotor moment of inertia
+2. Friction Test - Maps friction across velocity range
+3. Torque Constant Verification - Validates kt measurement
+4. Damping Test - Identifies viscous damping coefficient
+5. Validation - Verifies parameter accuracy with trajectory tracking
+
+See `examples/calibration_example.rs` for a complete demonstration.
+
+-----
+
 ## \#\# Setup
 
 To use `iRPC` in your project, add it to your `Cargo.toml`.
