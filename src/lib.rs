@@ -32,10 +32,14 @@ pub use protocol::*;
 
 // Re-export bus types based on features
 #[cfg(feature = "arm_api")]
-pub use bus::{CommunicationAdapter, DeviceInfo};
+pub use bus::CommunicationAdapter;
 
 #[cfg(feature = "joint_api")]
-pub use bus::{EmbeddedTransport, TransportLayer, TransportError, DeviceInfo};
+pub use bus::{EmbeddedTransport, TransportLayer, TransportError};
+
+// Export DeviceInfo when either feature is enabled (avoid duplicate)
+#[cfg(any(feature = "arm_api", feature = "joint_api"))]
+pub use bus::DeviceInfo;
 
 #[cfg(feature = "arm_api")]
 pub use arm::*;

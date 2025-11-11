@@ -262,6 +262,91 @@ impl JointProxy {
     pub fn id(&self) -> DeviceId {
         self.joint_id
     }
+
+    // ========================================================================
+    // Power Monitoring API (v2.2)
+    // ========================================================================
+
+    /// Configure power monitoring parameters
+    ///
+    /// Sets voltage/current limits, thermal thresholds, and telemetry rate.
+    /// Can be called in any lifecycle state.
+    pub async fn configure_power(&self, config: crate::protocol::PowerConfig) -> Result<(), ProtocolError> {
+        let payload = Payload::ConfigurePower(config);
+        let response = self.comm_manager.send_and_wait(self.joint_id, payload).await?;
+
+        match response.payload {
+            Payload::Ack(_) => {
+                debug!("Joint {} power configuration updated", self.joint_id);
+                Ok(())
+            }
+            Payload::Nack { id, error } => {
+                error!("Joint {} power configuration failed: error {}", self.joint_id, error);
+                Err(ProtocolError::IoError(id))
+            }
+            _ => Err(ProtocolError::InvalidMessage)
+        }
+    }
+
+    /// Request current power configuration
+    ///
+    /// Queries the device for its current power monitoring settings.
+    pub async fn get_power_config(&self) -> Result<crate::protocol::PowerConfig, ProtocolError> {
+        let response = self.comm_manager
+            .send_and_wait(self.joint_id, Payload::RequestPowerConfig)
+            .await?;
+
+        match response.payload {
+            Payload::PowerConfigResponse(config) => {
+                debug!("Joint {} power config: telemetry_rate={}Hz",
+                       self.joint_id, config.telemetry_rate_hz);
+                Ok(config)
+            }
+            Payload::Nack { id, error } => {
+                error!("Joint {} get power config failed: error {}", self.joint_id, error);
+                Err(ProtocolError::IoError(id))
+            }
+            _ => Err(ProtocolError::InvalidMessage)
+        }
+    }
+
+    /// Request fault history
+    ///
+    /// Retrieves the circular buffer of last 10 faults with diagnostic data.
+    /// Useful for troubleshooting and predictive maintenance.
+    pub async fn get_fault_history(&self) -> Result<crate::protocol::FaultHistory, ProtocolError> {
+        let response = self.comm_manager
+            .send_and_wait(self.joint_id, Payload::RequestFaultHistory)
+            .await?;
+
+        match response.payload {
+            Payload::FaultHistory(history) => {
+                info!("Joint {} fault history: {} total faults, {} valid records",
+                      self.joint_id, history.total_faults, history.valid_count);
+                Ok(history)
+            }
+            Payload::Nack { id, error } => {
+                error!("Joint {} get fault history failed: error {}", self.joint_id, error);
+                Err(ProtocolError::IoError(id))
+            }
+            _ => Err(ProtocolError::InvalidMessage)
+        }
+    }
+
+    /// Set power telemetry streaming rate
+    ///
+    /// Convenience method to quickly adjust telemetry rate (1-100 Hz).
+    /// Updates only the telemetry rate while preserving other power settings.
+    pub async fn set_power_telemetry_rate(&self, rate_hz: u8) -> Result<(), ProtocolError> {
+        // First get current config
+        let mut config = self.get_power_config().await?;
+
+        // Update only the telemetry rate
+        config.telemetry_rate_hz = rate_hz.clamp(1, 100);
+
+        // Send updated config
+        self.configure_power(config).await
+    }
 }
 /// ARM orchestrator that coordinates multiple joints and manages the system lifecycle
 #[cfg(feature = "arm_api")]

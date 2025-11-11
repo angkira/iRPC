@@ -349,6 +349,183 @@ pub struct CalibrationResult {
     pub error_code: u16,
 }
 
+/// Fault event counters for power monitoring
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FaultCounters {
+    /// Number of overcurrent events detected
+    pub overcurrent_events: u16,
+    /// Number of overvoltage events detected
+    pub overvoltage_events: u16,
+    /// Number of undervoltage events detected
+    pub undervoltage_events: u16,
+    /// Number of overtemperature events detected
+    pub overtemp_events: u16,
+    /// Number of motor driver fault events
+    pub driver_fault_events: u16,
+    /// Number of emergency stop events
+    pub emergency_stops: u16,
+}
+
+impl Default for FaultCounters {
+    fn default() -> Self {
+        Self {
+            overcurrent_events: 0,
+            overvoltage_events: 0,
+            undervoltage_events: 0,
+            overtemp_events: 0,
+            driver_fault_events: 0,
+            emergency_stops: 0,
+        }
+    }
+}
+
+/// Comprehensive power monitoring telemetry (v2.2)
+///
+/// Size: ~56 bytes (struct) + ~8 bytes (postcard) = ~64 bytes
+/// Fits in CAN-FD frame (64 bytes data payload)
+///
+/// At 10 Hz streaming (default):
+/// - Bandwidth: 64 bytes * 8 * 10 = 5.12 kbps
+/// - CAN-FD usage: 5.12 / 5000 = 0.1% (minimal overhead)
+///
+/// At 100 Hz streaming (maximum):
+/// - Bandwidth: 64 bytes * 8 * 100 = 51.2 kbps
+/// - CAN-FD usage: 51.2 / 5000 = 1.0% (acceptable)
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct PowerMetrics {
+    /// Supply bus voltage (millivolts)
+    pub vbus_mv: u32,
+    /// Phase A current (milliamps, signed)
+    pub ia_ma: i32,
+    /// Phase B current (milliamps, signed)
+    pub ib_ma: i32,
+    /// RMS current (milliamps)
+    pub i_rms_ma: f32,
+    /// Instantaneous electrical power (milliwatts)
+    pub power_mw: u32,
+    /// MCU die temperature (degrees Celsius)
+    pub mcu_temp_c: f32,
+    /// Thermal throttle factor (0.0 to 1.0, where 1.0 = no throttling)
+    pub throttle_factor: f32,
+    /// Accumulated energy consumption (milliwatt-hours)
+    pub energy_mwh: u32,
+    /// Accumulated charge (milliamp-hours)
+    pub charge_mah: u32,
+    /// Total active time (milliseconds)
+    pub active_time_ms: u32,
+    /// Fault event counters
+    pub faults: FaultCounters,
+}
+
+/// Emergency stop reason codes
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum EmergencyReason {
+    /// Supply voltage exceeded maximum limit
+    Overvoltage = 0,
+    /// Supply voltage below minimum limit
+    Undervoltage = 1,
+    /// Instantaneous current exceeded peak limit
+    PeakOvercurrent = 2,
+    /// RMS current exceeded continuous limit
+    RmsOvercurrent = 3,
+    /// Temperature exceeded thermal shutdown limit
+    Overtemperature = 4,
+    /// Motor driver hardware fault detected
+    DriverFault = 5,
+    /// Watchdog timer reset occurred
+    WatchdogReset = 6,
+    /// Manual emergency stop triggered
+    ManualStop = 7,
+}
+
+/// Emergency stop event notification (v2.2)
+///
+/// High-priority safety notification sent immediately when fault occurs.
+/// Transmission latency target: <10ms from detection to CAN bus.
+///
+/// Size: ~20 bytes (fits in single CAN frame)
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct EmergencyStop {
+    /// Reason for emergency stop
+    pub reason: EmergencyReason,
+    /// Supply voltage at fault time (millivolts)
+    pub vbus_mv: u32,
+    /// Current at fault time (milliamps, signed)
+    pub current_ma: i32,
+    /// Temperature at fault time (degrees Celsius)
+    pub temp_c: f32,
+    /// Timestamp since boot (milliseconds)
+    pub timestamp_ms: u32,
+}
+
+/// Power monitoring configuration (v2.2)
+///
+/// Bidirectional configuration for runtime adjustment of power limits
+/// and telemetry settings.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct PowerConfig {
+    /// Overvoltage shutdown threshold (millivolts)
+    pub vbus_overvoltage_mv: u32,
+    /// Undervoltage shutdown threshold (millivolts)
+    pub vbus_undervoltage_mv: u32,
+    /// Maximum continuous RMS current (milliamps)
+    pub max_rms_current_ma: u16,
+    /// Maximum peak current (milliamps)
+    pub max_peak_current_ma: u16,
+    /// Temperature threshold to start thermal throttling (degrees Celsius)
+    pub temp_throttle_start_c: u8,
+    /// Temperature threshold for thermal shutdown (degrees Celsius)
+    pub temp_shutdown_c: u8,
+    /// Power telemetry update rate (Hz, 1-100)
+    pub telemetry_rate_hz: u8,
+}
+
+impl Default for PowerConfig {
+    fn default() -> Self {
+        Self {
+            vbus_overvoltage_mv: 50000,     // 50V
+            vbus_undervoltage_mv: 8000,      // 8V
+            max_rms_current_ma: 1750,        // 1.75A
+            max_peak_current_ma: 2500,       // 2.5A
+            temp_throttle_start_c: 70,       // 70°C
+            temp_shutdown_c: 85,             // 85°C
+            telemetry_rate_hz: 10,           // 10 Hz default
+        }
+    }
+}
+
+/// Individual fault event record for diagnostic history
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct FaultRecord {
+    /// Fault type (EmergencyReason as u8)
+    pub fault_type: u8,
+    /// Timestamp of fault event (seconds since boot)
+    pub timestamp_sec: u32,
+    /// Supply voltage at fault time (millivolts)
+    pub vbus_mv: u16,
+    /// Current at fault time (milliamps, unsigned)
+    pub current_ma: u16,
+    /// Temperature at fault time (degrees Celsius, signed)
+    pub temp_c: i8,
+}
+
+/// Fault history diagnostic data (v2.2)
+///
+/// On-demand query/response for fault diagnosis and troubleshooting.
+/// Contains circular buffer of last N faults with environmental data.
+///
+/// Size: ~100 bytes (10 records * ~10 bytes each)
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct FaultHistory {
+    /// Last 10 fault records (circular buffer, oldest overwritten)
+    pub records: [FaultRecord; 10],
+    /// Total lifetime fault count (all time)
+    pub total_faults: u32,
+    /// Number of valid records in the array (0-10)
+    pub valid_count: u8,
+}
+
 /// Message payload variants for the iRPC protocol
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Payload {
@@ -401,6 +578,22 @@ pub enum Payload {
     CalibrationStatus(CalibrationStatus),
     /// Calibration final result (Joint → Arm, sent once at end)
     CalibrationResult(CalibrationResult),
+
+    // Power Monitoring (v2.2) - Phase 7
+    /// Power metrics telemetry stream (Joint → Arm, periodic broadcast)
+    PowerMetrics(PowerMetrics),
+    /// Emergency stop event notification (Joint → Arm, high-priority)
+    EmergencyStop(EmergencyStop),
+    /// Configure power monitoring parameters (Arm → Joint)
+    ConfigurePower(PowerConfig),
+    /// Request current power configuration (Arm → Joint)
+    RequestPowerConfig,
+    /// Power configuration response (Joint → Arm)
+    PowerConfigResponse(PowerConfig),
+    /// Request fault history (Arm → Joint)
+    RequestFaultHistory,
+    /// Fault history response (Joint → Arm)
+    FaultHistory(FaultHistory),
 
     // Bidirectional Management
     /// Acknowledgment of successful command

@@ -142,16 +142,44 @@ impl Joint {
                         // In a real implementation, this would set the target angle and velocity
                         Some(Payload::Ack(msg.header.msg_id))
                     }
-                    _ => Some(Payload::Nack { 
-                        id: msg.header.msg_id, 
+                    _ => Some(Payload::Nack {
+                        id: msg.header.msg_id,
                         error: 4 // Invalid state for set target
                     })
                 }
             }
+            // Power Monitoring (v2.2)
+            Payload::ConfigurePower(_config) => {
+                // Power configuration can be set in any state
+                // In a real implementation, this would update power limits and telemetry rate
+                Some(Payload::Ack(msg.header.msg_id))
+            }
+            Payload::RequestPowerConfig => {
+                // In a real implementation, this would return the current power configuration
+                // For now, return default configuration
+                Some(Payload::PowerConfigResponse(
+                    crate::protocol::PowerConfig::default()
+                ))
+            }
+            Payload::RequestFaultHistory => {
+                // In a real implementation, this would return the fault history from storage
+                // For now, return empty fault history
+                Some(Payload::FaultHistory(crate::protocol::FaultHistory {
+                    records: [crate::protocol::FaultRecord {
+                        fault_type: 0,
+                        timestamp_sec: 0,
+                        vbus_mv: 0,
+                        current_ma: 0,
+                        temp_c: 0,
+                    }; 10],
+                    total_faults: 0,
+                    valid_count: 0,
+                }))
+            }
             _ => {
                 // Unknown or unhandled command
-                Some(Payload::Nack { 
-                    id: msg.header.msg_id, 
+                Some(Payload::Nack {
+                    id: msg.header.msg_id,
                     error: 255 // Unknown command
                 })
             }
